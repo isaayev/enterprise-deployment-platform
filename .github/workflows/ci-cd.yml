@@ -1,0 +1,155 @@
+# =============================================================================
+# CI/CD Pipeline for NexusGaming Review Platform
+# =============================================================================
+# This workflow handles continuous integration (quality checks) and continuous
+# deployment (to Vercel) for the Next.js gaming review platform.
+#
+# Triggers:
+#   - Pull requests targeting main: runs quality checks only
+#   - Pushes to main: runs quality checks, then deploys to Vercel production
+# =============================================================================
+
+name: CI/CD Pipeline
+
+on:
+  # Run quality checks on every pull request targeting main
+  pull_request:
+    branches:
+      - main
+
+  # Run quality checks + deploy on every push to main
+  push:
+    branches:
+      - main
+
+# Cancel in-progress runs for the same branch/PR to save resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Quality Checks
+  # ===========================================================================
+  # Runs linting, type checking, tests, build verification, and security audit.
+  # This job runs on both pull_request and push events.
+  quality-checks:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Setup: checkout code, install Node.js, restore cache, install deps
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Cache node_modules based on package-lock.json hash to speed up builds
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # Linting: enforce code quality standards via ESLint
+      # continue-on-error is false (default) — lint failures block the pipeline
+      # -----------------------------------------------------------------------
+      - name: Lint
+        run: npm run lint
+
+      # -----------------------------------------------------------------------
+      # Type Checking: ensure TypeScript compiles without errors
+      # --noEmit means no output files, just type validation
+      # -----------------------------------------------------------------------
+      - name: Type check
+        run: npx tsc --noEmit
+
+      # -----------------------------------------------------------------------
+      # Tests: run the Vitest test suite
+      # --run flag exits after all tests complete (no watch mode)
+      # -----------------------------------------------------------------------
+      - name: Run tests
+        run: npm test -- --run
+
+      # -----------------------------------------------------------------------
+      # Build: verify the Next.js production build succeeds
+      # -----------------------------------------------------------------------
+      - name: Build
+        run: npm run build
+
+      # -----------------------------------------------------------------------
+      # Security Audit: check dependencies for known vulnerabilities
+      # continue-on-error: true — audit failures are reported but don't block
+      # the pipeline, since some advisories may not be actionable immediately
+      # -----------------------------------------------------------------------
+      - name: Security audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+  # ===========================================================================
+  # Deploy to Vercel (production)
+  # ===========================================================================
+  # Only runs on push to main, after quality checks pass.
+  # Uses the Vercel GitHub Action to deploy with the --prod flag.
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: quality-checks
+    # Only deploy on push to main, never on pull requests
+    if: github.event_name == 'push'
+
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.preview-url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Cache node_modules for the deploy job as well
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # -----------------------------------------------------------------------
+      # Deploy to Vercel using the official action
+      # Secrets must be configured in GitHub repository settings:
+      #   - VERCEL_TOKEN: Vercel API token for authentication
+      #   - VERCEL_ORG_ID: Vercel organization/team ID
+      #   - VERCEL_PROJECT_ID: Vercel project ID
+      # The --prod flag deploys to the production domain
+      # -----------------------------------------------------------------------
+      - name: Deploy to Vercel
+        id: deploy
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
