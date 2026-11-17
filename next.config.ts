@@ -49,11 +49,11 @@ const securityHeaders = [
   },
   ...(isProduction
     ? [
-        {
-          key: "Strict-Transport-Security",
-          value: "max-age=63072000; includeSubDomains; preload",
-        },
-      ]
+      {
+        key: "Strict-Transport-Security",
+        value: "max-age=63072000; includeSubDomains; preload",
+      },
+    ]
     : []),
 ];
 
@@ -96,14 +96,6 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
 };
 
 export default nextConfig;
